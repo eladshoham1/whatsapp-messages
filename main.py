@@ -1,9 +1,11 @@
+import re
+import time
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
+from selenium.webdriver.common.action_chains import ActionChains
 
 # Initialize the WebDriver
 driver = webdriver.Chrome()
@@ -12,8 +14,43 @@ driver = webdriver.Chrome()
 driver.get("https://web.whatsapp.com/")
 input("Scan the QR Code with WhatsApp and then press Enter")
 
-# Function to send a message to a group
-def send_message_to_group(group_name, message):
+# Names of the groups
+source_group = "טסט 1"
+target_group = "Test"
+last_message = None
+
+# Function to find a chat by title
+def find_chat_by_title(title: str) -> list:
+    chats = driver.find_elements(By.XPATH, f"//span[@title='{title}']")
+    if chats:
+        return chats[0]
+    else:
+        return None
+    
+def check_format(message: str) -> bool:
+    # Define the required fields
+    required_fields = [
+        "תאריך",
+        "שם מלא",
+        "מספר אישי",
+        "דרגה",
+        "יחידה",
+        "מספר רכב",
+        "סוג רכב",
+        "מטרת כניסה"
+    ]
+
+    # Check each field
+    for field in required_fields:
+        # Use regular expression to search for the field in the message
+        # re.IGNORECASE makes the search case-insensitive
+        if not re.search(field, message, re.IGNORECASE):
+            return False
+
+    return True
+
+def send_message_to_group(group_name: str, message: str) -> None:
+    global last_message
     try:
         # Wait for the search box and find the group
         search_box = WebDriverWait(driver, 20).until(
@@ -29,56 +66,46 @@ def send_message_to_group(group_name, message):
         )
         time.sleep(2)  # Allow time for the chat to open
 
-        # Find the message box and type the message
+        # Find the message box
         message_box = driver.find_element(By.XPATH, "//div[@contenteditable='true' and @data-tab='10']")
-        message_box.send_keys(message)
-        time.sleep(2)  # Allow time for the message to be typed
+
+        # Split the message by newline and send each part
+        # Use ActionChains to press SHIFT+ENTER for newline
+        for part in message.split('\n'):
+            ActionChains(driver).send_keys(part).perform()
+            ActionChains(driver).key_down(Keys.SHIFT).send_keys(Keys.ENTER).key_up(Keys.SHIFT).perform()
+
+        # Remove the last newline
+        ActionChains(driver).send_keys(Keys.BACK_SPACE).perform()
 
         # Send the message
         message_box.send_keys(Keys.ENTER)
-
         time.sleep(5)  # Wait for the message to be sent
+        last_message = message
         print("Message sent successfully.")
 
     except Exception as e:
         print(f"An error occurred: {e}")
 
-# Replace 'YOUR_GROUP_NAME' with the name of your WhatsApp group
-group_title = 'טסט 1'
+# Loop to keep checking for new messages
+while True:
+    source_chat = find_chat_by_title(source_group)
+    if source_chat:
+        source_chat.click()
+        time.sleep(5)  # Increased wait time for messages to load
 
-try:
+        # Retrieve all messages
+        try:
+            messages = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in') or contains(@class, 'message-out')]")
 
-    while True:
-        # Locate the group
-        group = driver.find_element(By.XPATH, f"//span[@title='{group_title}']")
-        group.click()
-        
-        # Find all messages in the group
-        messages = driver.find_elements(By.CLASS_NAME, 'message-in')
+            if messages and len(messages) > 0:
+                message = messages[-1].find_element(By.XPATH, ".//span[contains(@class, 'selectable-text')]").text
 
-        if messages:
-            last_message = messages[-1].find_element(By.CSS_SELECTOR, 'span.selectable-text').text
-            print(last_message)
+                if message != last_message and check_format(message):
+                    send_message_to_group(target_group, message)
 
-        # Wait for a bit before checking for new messages
-        time.sleep(1)
+        except Exception as e:
+            print(f"Error while getting messages: {e}")
 
-except Exception as e:
-    print(f"An error occurred: {e}")
-finally:
-    driver.quit()
-
-# group_name = "טסט 1"
-# while True:
-#     last_messages = get_last_messages(driver, group_name)
-    
-#     # Print the messages
-#     for msg in last_messages:
-#         print(msg)
-#     time.sleep(2)
-
-# Example usage
-# group_name = "Test"
-# message = "Hello, this is a test message from Python!"
-# send_message_to_group(group_name, message)
-
+    # Wait before checking for new messages again
+    time.sleep(2)
